@@ -64,7 +64,7 @@ inline void output_phrase(	wt_bwt & bwt,
 	//if following position is valid, compute it
 	if(index >= range.first && index < range.second){
 
-		succ_occ = jump_back(bwt, index-1, phrase.length());
+		succ_occ = jump_back(bwt, index, phrase.length());
 
 	}
 
@@ -121,15 +121,22 @@ int main(int argc,char** argv){
 		ifstream in(filePath);
 		auto F = get_frequencies(in);
 
-		for(auto f : F) alphabet.insert(f.first);
+		for(auto f : F) if(f.second>0) alphabet.insert(f.first);
 
 		bwt = wt_bwt(F); //Huffman-encoded BWT
 	}
 
 	// prepend the alphabet to the text
 
-	for(auto c : alphabet)
+	string prefix;
+
+	for (auto rit = alphabet.rbegin(); rit != alphabet.rend(); rit++){
+
+		auto c = *rit;
+		prefix += c;
 		bwt.extend(c);
+
+	}
 
 	// process the text
 
@@ -156,7 +163,7 @@ int main(int argc,char** argv){
 
 				if(empty_interval(range)){//end of phrase
 
-					 output_phrase(bwt,c,LZ77k,prev_range,range,index,phrase);
+					output_phrase(bwt,c,LZ77k,prev_range,range,index,phrase);
 
 				}else{
 
@@ -183,6 +190,7 @@ int main(int argc,char** argv){
 
 	}
 
+	cout << "factorization: " << endl;
 	for(auto p : LZ77k){
 
 		cout << p.first << ", " << p.second << endl;
