@@ -3,17 +3,21 @@
  */
 
 #include <dynamic.hpp>
+#include <unistd.h>
 
 using namespace dyn;
 using namespace std;
 
 void help(){
 
-	cout << "Usage: ho-lz77 input.txt\n";
-	exit(0);
+	cout << "ho-lz77 [options]" << endl <<
+	"Options:" << endl <<
+	"-i <arg>   Input file (REQUIRED)" << endl <<
+	"-t         Output in triples format (default: pairs)." << endl <<
+	"-h         This help." << endl;
+	 exit(0);
 
 }
-
 /*
  * number of bits required to write down x>0
  */
@@ -178,7 +182,28 @@ int main(int argc,char** argv){
 
 	if(argc<2) help();
 
-	string filePath = argv[1];
+	bool triples = false;
+	string filePath;
+
+	int opt;
+	while ((opt = getopt(argc, argv, "i:th")) != -1){
+		switch (opt){
+			case 'h':
+				help();
+			break;
+			case 't':
+				triples = true;
+			break;
+			case 'i':
+				filePath = string(optarg);
+			break;
+			default:
+				help();
+			return -1;
+		}
+	}
+
+	if(filePath.length()==0) help();
 
 	cout << "Input file " << filePath << endl;
 
