@@ -14,6 +14,77 @@ void help(){
 
 }
 
+/*
+ * number of bits required to write down x>0
+ */
+uint64_t bit_size(uint64_t x){
+
+	assert(x>0);
+
+	return 64 - __builtin_clzll(x);
+
+}
+
+/*
+ * compute the bit-size of the gamma encoding of x
+ */
+uint64_t gamma(uint64_t x){
+
+	return 2*bit_size(x) - 1;
+
+}
+
+uint64_t delta(uint64_t x){
+
+	auto bits = bit_size(x);//bits needed to encode x
+
+	return gamma(bits) + bits -1;
+
+}
+
+/*
+ * compute how many bits would the parse take in practice
+ */
+uint64_t compute_gamma_bit_complexity(vector<pair<int64_t,uint64_t> > & parse){
+
+	uint64_t x = 0;
+
+	for(auto p:parse){
+
+		uint64_t off = p.first<0?-p.first:p.first;//absolute value
+		uint64_t len = p.second;
+
+		x++;//1 bit for the sign of off
+
+		x += gamma(off);
+		x += gamma(len);
+
+	}
+
+	return x;
+
+}
+
+uint64_t compute_delta_bit_complexity(vector<pair<int64_t,uint64_t> > & parse){
+
+	uint64_t x = 0;
+
+	for(auto p:parse){
+
+		uint64_t off = p.first<0?-p.first:p.first;//absolute value
+		uint64_t len = p.second;
+
+		x++;//1 bit for the sign of off
+
+		x += delta(off);
+		x += delta(len);
+
+	}
+
+	return x;
+
+}
+
 bool empty_interval(pair<uint64_t, uint64_t> interval){
 	return interval.first >= interval.second;
 }
@@ -35,7 +106,6 @@ uint64_t jump_back(wt_bwt & bwt, uint64_t index, uint64_t L){
 }
 
 inline void output_phrase(	wt_bwt & bwt,
-							char & c,
 							vector<pair<int64_t, uint64_t> > & LZ77k,
 							pair<uint64_t,uint64_t> & prev_range,
 							pair<uint64_t,uint64_t> & range,
@@ -91,7 +161,7 @@ inline void output_phrase(	wt_bwt & bwt,
 
 	//extend BWT with the characters in the phrase
 	for(auto c : phrase)
-		bwt.extend(c);
+		bwt.extend(uint8_t(c));
 
 	//erase phrase content
 	phrase = string();
@@ -134,7 +204,7 @@ int main(int argc,char** argv){
 
 		auto c = *rit;
 		prefix += c;
-		bwt.extend(c);
+		bwt.extend(uint8_t(c));
 
 	}
 
@@ -156,20 +226,29 @@ int main(int argc,char** argv){
 			if(in.good())
 				in.get(c);//get character
 
+			uint64_t read_char = 1;
+
 			while(in.good()) {
 
 				prev_range = range;
-				range = bwt.LF(range, c);
+				range = bwt.LF(range, uint8_t(c));
 
 				if(empty_interval(range)){//end of phrase
 
-					output_phrase(bwt,c,LZ77k,prev_range,range,index,phrase);
+					output_phrase(bwt,LZ77k,prev_range,range,index,phrase);
 
 				}else{
 
-					index = bwt.LF(index,c);
+					index = bwt.LF(index,uint8_t(c));
 					phrase += c;
 					in.get(c);//get next character
+					read_char++;
+
+					if(read_char%100000 == 0){
+
+						cout << "read " << read_char << " characters." << endl;
+
+					}
 
 				}
 
@@ -181,7 +260,7 @@ int main(int argc,char** argv){
 		if(phrase.length()>0){
 
 			prev_range = range;
-			output_phrase(bwt,c,LZ77k,prev_range,range,index,phrase);
+			output_phrase(bwt,LZ77k,prev_range,range,index,phrase);
 
 		}
 
@@ -190,12 +269,46 @@ int main(int argc,char** argv){
 
 	}
 
-	cout << "factorization: " << endl;
+	/*cout << "factorization: " << endl;
 	for(auto p : LZ77k){
 
 		cout << p.first << ", " << p.second << endl;
 
+	}*/
+
+	auto N = bwt.size() -1;//file length
+
+
+	uint64_t positive = 0;//positive offsets
+
+	for(auto p : LZ77k){
+
+		positive += p.first>0;
+
 	}
+
+	cout << "positive offsets: " << positive << endl;
+	cout << "negative offsets: " << LZ77k.size()-positive << endl;
+
+	int bucket_size = 1;
+
+	auto buckets = vector<uint64_t>(bwt.size()/bucket_size + 1);
+
+	for(auto p : LZ77k){
+
+		buckets[(p.first<0?-p.first:p.first)/bucket_size]++;
+
+	}
+
+	for(int i=0;i<1000;++i){
+
+		//cout << "[" << i*bucket_size << "," << (i+1)*bucket_size << ") : " << buckets[i] << endl;
+		cout << i << "\t" << buckets[i] << endl;
+
+	}
+
+	cout << "gamma complexity of the output: " << compute_gamma_bit_complexity(LZ77k)/8+1 << " Bytes, " << double(compute_gamma_bit_complexity(LZ77k))/double(N) << " bit/symbol" << endl;
+	cout << "delta complexity of the output: " << compute_delta_bit_complexity(LZ77k)/8+1 << " Bytes, " << double(compute_delta_bit_complexity(LZ77k))/double(N) << " bit/symbol" << endl;
 
 	return 0;
 
