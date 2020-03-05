@@ -505,7 +505,7 @@ void run_pairs(string filePath){
 
 	int bucket_size = 1;
 
-	auto buckets = vector<uint64_t>(bwt.size()/bucket_size + 1);
+	/*auto buckets = vector<uint64_t>(bwt.size()/bucket_size + 1);
 
 	for(auto p : LZ77k){
 
@@ -518,7 +518,7 @@ void run_pairs(string filePath){
 		//cout << "[" << i*bucket_size << "," << (i+1)*bucket_size << ") : " << buckets[i] << endl;
 		cout << i << "\t" << buckets[i] << endl;
 
-	}
+	}*/
 
 	cout << "number of phrases = " << LZ77k.size() << endl;
 	cout << "gamma complexity of the output: " << compute_gamma_bit_complexity(LZ77k)/8+1 << " Bytes, " << double(compute_gamma_bit_complexity(LZ77k))/double(N) << " bit/symbol" << endl;
@@ -638,7 +638,7 @@ void run_triples(string filePath){
 	cout << "positive offsets: " << positive << endl;
 	cout << "negative offsets: " << LZ77k.size()-positive << endl;
 
-	int bucket_size = 1;
+	/*int bucket_size = 1;
 
 	auto buckets = vector<uint64_t>(bwt.size()/bucket_size + 1);
 
@@ -648,7 +648,7 @@ void run_triples(string filePath){
 
 	}
 
-	/*for(int i=0;i<1000;++i){
+	for(int i=0;i<1000;++i){
 
 		//cout << "[" << i*bucket_size << "," << (i+1)*bucket_size << ") : " << buckets[i] << endl;
 		cout << i << "\t" << buckets[i] << endl;
