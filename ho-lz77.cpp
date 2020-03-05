@@ -4,6 +4,7 @@
 
 #include <dynamic.hpp>
 #include <unistd.h>
+#include <unordered_map>
 
 using namespace dyn;
 using namespace std;
@@ -23,9 +24,7 @@ void help(){
  */
 uint64_t bit_size(uint64_t x){
 
-	assert(x>0);
-
-	return 64 - __builtin_clzll(x);
+	return x==0 ? 1 : 64 - __builtin_clzll(x);
 
 }
 
@@ -91,6 +90,150 @@ uint64_t compute_delta_bit_complexity(vector<pair<int64_t,uint64_t> > & parse){
 	return x;
 
 }
+
+uint64_t compute_Huff_bit_complexity(vector<pair<int64_t,uint64_t> > & pairs, vector<char> trails){
+
+	uint64_t max_encoded_off = 3200000;//max offset that we encode with Huffman. The others use delta(0).delta(offset) (0 receives the longest code)
+	uint64_t max_encoded_len = 100000;//max phrase length that we encode with Huffman. The others use delta(0).delta(len) (0 receives the longest code)
+
+	vector<uint64_t> off_freq(max_encoded_off+1);
+	vector<uint64_t> len_freq(max_encoded_len+1);
+	vector<uint64_t> char_freq(256);
+
+	uint64_t z = pairs.size();
+
+	for(uint64_t i=0;i<z;++i){
+
+		//absolute value
+		pairs[i].first = pairs[i].first < 0 ? -pairs[i].first : pairs[i].first;
+
+		if(pairs[i].first==0 or pairs[i].second==0){
+			cout << "err: zero entry in a pair: " << pairs[i].first << " , " << pairs[i].second << endl;
+			exit(0);
+		}
+
+		if(pairs[i].first <= max_encoded_off) off_freq[uint64_t(pairs[i].first)]++;
+		if(pairs[i].second <= max_encoded_len) len_freq[pairs[i].second]++;
+		char_freq[uint8_t(trails[i])]++;
+
+	}
+
+	double off_sum = 0;
+	double len_sum = 0;
+	double char_sum = 0;
+
+	for(auto x : off_freq) off_sum += x;
+	for(auto x : len_freq) len_sum += x;
+	for(auto x : char_freq) char_sum += x;
+
+	vector<pair<uint64_t,double> > off_f(max_encoded_off+1);
+	vector<pair<uint64_t,double> > len_f(max_encoded_len+1);
+	vector<pair<uint64_t,double> > char_f(256);
+
+	bool p50=false;
+	bool p75=false;
+	bool p95=false;
+
+
+	double F = 0;//cumulative
+	for(uint64_t i=0;i<max_encoded_off+1;++i){
+
+		off_f[i].first = i;
+		off_f[i].second = double(off_freq[i])/off_sum;
+
+		F += off_f[i].second;
+
+		if(F>=0.5 and not p50){ cout << "50% percentile : " << i << endl; p50=true;}
+		if(F>=0.75 and not p75){ cout << "75% percentile : " << i << endl; p75=true;}
+		if(F>=0.95 and not p95){ cout << "95% percentile : " << i << endl; p95=true;}
+
+	}
+
+	for(uint64_t i=0;i<max_encoded_len+1;++i){
+
+		len_f[i].first = i;
+		len_f[i].second = double(len_freq[i])/len_sum;
+
+	}
+
+	for(uint64_t i=0;i<256;++i){
+
+		char_f[i].first = i;
+		char_f[i].second = double(char_freq[i])/char_sum;
+
+	}
+
+	auto off_encoding = alphabet_encoder(off_f);
+	auto len_encoding = alphabet_encoder(len_f);
+	auto char_encoding = alphabet_encoder(char_f);
+
+	/*
+	cout << "Huffman lengths for offsets: " << endl;
+	for(uint64_t i = 0;i<=500;++i)
+		cout << i << ": " << off_encoding.encode(i).size() << endl;
+
+	cout << "Huffman lengths for lengths: " << endl;
+	for(uint64_t i = 0;i<=500;++i)
+		cout << i << ": " << len_encoding.encode(i).size() << endl;
+
+	cout << "Huffman lengths for trail chars: " << endl;
+	for(uint64_t c = 0;c<256;++c)
+		cout << char(c) << ": " << char_encoding.encode(uint8_t(c)).size() << endl;*/
+
+
+	//uint64_t x = (max_encoded_off+2 + max_encoded_len + 2 + 256)*64; //the model
+	uint64_t x = 0;
+
+	for(uint64_t i=0;i<z;++i){
+
+		x++; // sign of offset
+
+		if(pairs[i].first <= max_encoded_off)
+			x += off_encoding.encode(uint64_t(pairs[i].first)).size();
+		else
+			x += off_encoding.encode(0).size() + delta(uint64_t(pairs[i].first));
+
+		if(pairs[i].second <= max_encoded_len)
+			x += len_encoding.encode(pairs[i].second).size();
+		else
+			x += len_encoding.encode(0).size() + delta(pairs[i].second);
+
+		x += char_encoding.encode(uint8_t(trails[i])).size();
+
+
+	}
+
+	return x;
+
+}
+
+
+/*
+ * entropy of a vector
+ */
+double entropy(vector<uint64_t> & V){
+
+	unordered_map<uint64_t, double> freq;
+	double n = V.size();
+
+	for(auto x : V)	freq[x]=0;
+	for(auto x : V)	freq[x]++;
+
+	double H = 0;
+
+	for(auto p : freq){
+
+		auto f = p.second/n;
+
+		H -= f*log2(f);
+
+	}
+
+	return H;
+
+}
+
+
 
 bool empty_interval(pair<uint64_t, uint64_t> interval){
 	return interval.first >= interval.second;
@@ -505,12 +648,12 @@ void run_triples(string filePath){
 
 	}
 
-	for(int i=0;i<1000;++i){
+	/*for(int i=0;i<1000;++i){
 
 		//cout << "[" << i*bucket_size << "," << (i+1)*bucket_size << ") : " << buckets[i] << endl;
 		cout << i << "\t" << buckets[i] << endl;
 
-	}
+	}*/
 
 	uint64_t gamma_trail = 0;
 	uint64_t delta_trail = 0;
@@ -522,9 +665,24 @@ void run_triples(string filePath){
 
 	}
 
+	auto G = gamma_trail+compute_gamma_bit_complexity(LZ77k);
+	auto D = delta_trail+compute_delta_bit_complexity(LZ77k);
+	auto H = compute_Huff_bit_complexity(LZ77k,trail_chars);
+
+	vector<uint64_t> abs_off;
+	for(auto x : LZ77k) abs_off.push_back(x.first<0?-x.first:x.first);
+
+	uint64_t sum_log = 0;
+
+	for(auto x:abs_off) sum_log += bit_size(x)+1;
+
 	cout << "number of phrases = " << LZ77k.size() << endl;
-	cout << "gamma complexity of the output: " << ((gamma_trail+compute_gamma_bit_complexity(LZ77k))/8)+1 << " Bytes, " << double(compute_gamma_bit_complexity(LZ77k))/double(N) << " bit/symbol" << endl;
-	cout << "delta complexity of the output: " << ((delta_trail+compute_delta_bit_complexity(LZ77k))/8)+1 << " Bytes, " << double(compute_delta_bit_complexity(LZ77k))/double(N) << " bit/symbol" << endl;
+	cout << "Entropy of the offsets: " << (entropy(abs_off)+1) << endl;
+	cout << "Sum of logs of the offsets: " << sum_log << endl;
+	cout << "gamma complexity of the output: " << (G/8)+1 << " Bytes, " << double(G)/double(N) << " bit/symbol" << endl;
+	cout << "delta complexity of the output: " << (D/8)+1 << " Bytes, " << double(D)/double(N) << " bit/symbol" << endl;
+	cout << "Huffman complexity of the output: " << (H/8)+1 << " Bytes, " << double(H)/double(N) << " bit/symbol" << endl;
+
 
 }
 
