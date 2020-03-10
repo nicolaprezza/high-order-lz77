@@ -107,11 +107,6 @@ uint64_t compute_Huff_bit_complexity(vector<pair<int64_t,uint64_t> > & pairs, ve
 		//absolute value
 		pairs[i].first = pairs[i].first < 0 ? -pairs[i].first : pairs[i].first;
 
-		if(pairs[i].first==0 or pairs[i].second==0){
-			cout << "err: zero entry in a pair: " << pairs[i].first << " , " << pairs[i].second << endl;
-			exit(0);
-		}
-
 		if(pairs[i].first <= max_encoded_off) off_freq[uint64_t(pairs[i].first)]++;
 		if(pairs[i].second <= max_encoded_len) len_freq[pairs[i].second]++;
 		char_freq[uint8_t(trails[i])]++;
@@ -519,10 +514,33 @@ void run_pairs(string filePath){
 		cout << i << "\t" << buckets[i] << endl;
 
 	}*/
+	vector<uint64_t> abs_off;
+	for(auto x : LZ77k) abs_off.push_back(x.first<0?-x.first:x.first);
 
-	cout << "number of phrases = " << LZ77k.size() << endl;
-	cout << "gamma complexity of the output: " << compute_gamma_bit_complexity(LZ77k)/8+1 << " Bytes, " << double(compute_gamma_bit_complexity(LZ77k))/double(N) << " bit/symbol" << endl;
-	cout << "delta complexity of the output: " << compute_delta_bit_complexity(LZ77k)/8+1 << " Bytes, " << double(compute_delta_bit_complexity(LZ77k))/double(N) << " bit/symbol" << endl;
+	vector<uint64_t> Len;
+	for(auto x : LZ77k) Len.push_back(x.second);
+
+	uint64_t sum_log = 0;
+
+	for(auto x:abs_off) sum_log += bit_size(x)+1;
+
+	auto G = compute_gamma_bit_complexity(LZ77k);
+	auto D = compute_delta_bit_complexity(LZ77k);
+	auto EO = (entropy(abs_off)+1);
+	auto EL = entropy(Len);
+	auto low_bound = (EO+EL)*LZ77k.size();
+
+	cout << "number of phrases = " << LZ77k.size() << endl<<endl;
+
+	cout << "Entropy of the offsets: " << EO << endl;
+	cout << "Entropy of the lengths: " << EL << endl;
+	cout << "Lower bound for encoding the pairs: " << low_bound << " bits (" << low_bound/double(N) << " bit/char, " << low_bound/8 + 1 << " Bytes)" << endl << endl;
+
+	cout << "Sum of logs of the offsets: " << sum_log << endl;
+	cout << "Weighted sum of logs of the offsets: " << double(sum_log)/double(LZ77k.size()) << endl<<endl;
+
+	cout << "gamma complexity of the output: " << G/8+1 << " Bytes, " << double(G)/double(N) << " bit/symbol" << endl;
+	cout << "delta complexity of the output: " << D/8+1 << " Bytes, " << double(D)/double(N) << " bit/symbol" << endl;
 
 }
 
@@ -541,18 +559,6 @@ void run_triples(string filePath){
 		for(auto f : F) if(f.second>0) alphabet.insert(f.first);
 
 		bwt = wt_bwt(F); //Huffman-encoded BWT
-	}
-
-	// prepend the alphabet to the text
-
-	string prefix;
-
-	for (auto rit = alphabet.rbegin(); rit != alphabet.rend(); rit++){
-
-		auto c = *rit;
-		prefix += c;
-		bwt.extend(uint8_t(c));
-
 	}
 
 	// the parse
@@ -679,6 +685,7 @@ void run_triples(string filePath){
 	cout << "number of phrases = " << LZ77k.size() << endl;
 	cout << "Entropy of the offsets: " << (entropy(abs_off)+1) << endl;
 	cout << "Sum of logs of the offsets: " << sum_log << endl;
+	cout << "Weighted sum of logs of the offsets: " << double(sum_log)/double(LZ77k.size()) << endl;
 	cout << "gamma complexity of the output: " << (G/8)+1 << " Bytes, " << double(G)/double(N) << " bit/symbol" << endl;
 	cout << "delta complexity of the output: " << (D/8)+1 << " Bytes, " << double(D)/double(N) << " bit/symbol" << endl;
 	cout << "Huffman complexity of the output: " << (H/8)+1 << " Bytes, " << double(H)/double(N) << " bit/symbol" << endl;
