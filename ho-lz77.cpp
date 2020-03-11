@@ -15,6 +15,7 @@ void help(){
 	"Options:" << endl <<
 	"-i <arg>   Input file (REQUIRED)" << endl <<
 	"-t         Output in triples format (default: pairs)." << endl <<
+	"-l         Output in locally-bitwise-optimal pair format (default: false)." << endl <<
 	"-h         This help." << endl;
 	 exit(0);
 
@@ -250,6 +251,49 @@ uint64_t jump_back(wt_bwt & bwt, uint64_t index, uint64_t L){
 
 }
 
+inline int64_t get_off(	wt_bwt & bwt,
+						pair<uint64_t,uint64_t> & range,
+						uint64_t index,
+						uint64_t phrase_len){
+
+	//assign a default high value to previous/next occurrence of the phrase in co-lex order;
+	//if they are not initialized later, the high value will not be chosen since
+	//we minimize the distance with the current prefix in co-lex order
+	int64_t pred_occ = bwt.size()*2;
+	int64_t succ_occ = bwt.size()*2;
+
+	//if previous position is valid, compute it
+	if(index>0 && index-1 >= range.first && index-1 < range.second){
+
+		pred_occ = jump_back(bwt, index-1, phrase_len);
+
+	}
+
+	//if following position is valid, compute it
+	if(index >= range.first && index < range.second){
+
+		succ_occ = jump_back(bwt, index, phrase_len);
+
+	}
+
+	//at least one of the two must be initialized since there must be a previous
+	//occurrence of the phrase!
+	assert(pred_occ < bwt.size() or succ_occ < bwt.size());
+
+	//co-lex position of current prefix
+	int64_t current_prefix_pos = bwt.get_terminator_position();
+
+	//the previous occurrence cannot be the current text prefix!
+	assert(pred_occ != current_prefix_pos and succ_occ != current_prefix_pos);
+
+	//absolute distances
+	int64_t abs_dist_pred = current_prefix_pos > pred_occ ? current_prefix_pos - pred_occ : pred_occ - current_prefix_pos;
+	int64_t abs_dist_succ = current_prefix_pos > succ_occ ? current_prefix_pos - succ_occ : succ_occ - current_prefix_pos;
+
+	return abs_dist_pred < abs_dist_succ ? current_prefix_pos - pred_occ : current_prefix_pos - succ_occ;
+
+}
+
 inline void output_phrase(	wt_bwt & bwt,
 							vector<pair<int64_t, uint64_t> > & LZ77k,
 							pair<uint64_t,uint64_t> & prev_range,
@@ -480,7 +524,8 @@ void run_pairs(string filePath){
 	/*cout << "factorization: " << endl;
 	for(auto p : LZ77k){
 
-		cout << p.first << ", " << p.second << endl;
+		auto d = 1+delta(p.first<0?-p.first:p.first);
+		cout << "off = " << p.first << " (" << d  << "  bits), len = " << p.second << " (" << (double(d)/double(p.second)) << " bit/symbol)" << endl;
 
 	}*/
 
@@ -524,8 +569,8 @@ void run_pairs(string filePath){
 
 	for(auto x:abs_off) sum_log += bit_size(x)+1;
 
-	auto G = compute_gamma_bit_complexity(LZ77k);
-	auto D = compute_delta_bit_complexity(LZ77k);
+	auto G = alphabet.size()*8 + compute_gamma_bit_complexity(LZ77k);
+	auto D = alphabet.size()*8 + compute_delta_bit_complexity(LZ77k);
 	auto EO = (entropy(abs_off)+1);
 	auto EL = entropy(Len);
 	auto low_bound = (EO+EL)*LZ77k.size();
@@ -537,12 +582,227 @@ void run_pairs(string filePath){
 	cout << "Lower bound for encoding the pairs: " << low_bound << " bits (" << low_bound/double(N) << " bit/char, " << low_bound/8 + 1 << " Bytes)" << endl << endl;
 
 	cout << "Sum of logs of the offsets: " << sum_log << endl;
-	cout << "Weighted sum of logs of the offsets: " << double(sum_log)/double(LZ77k.size()) << endl<<endl;
+	cout << "Average of logs of the offsets: " << double(sum_log)/double(LZ77k.size()) << endl<<endl;
 
 	cout << "gamma complexity of the output: " << G/8+1 << " Bytes, " << double(G)/double(N) << " bit/symbol" << endl;
 	cout << "delta complexity of the output: " << D/8+1 << " Bytes, " << double(D)/double(N) << " bit/symbol" << endl;
 
 }
+
+
+/*
+ * minimize the bit-size of each phrase, possibly cutting it
+ */
+void run_pairs_local(string filePath){
+
+	cout << "Computing the locally-optimal parse in format (occ,len)" << endl;
+
+	wt_bwt bwt;
+	set<char> alphabet;
+
+	{
+		ifstream in(filePath);
+		auto F = get_frequencies(in);
+
+		for(auto f : F) if(f.second>0) alphabet.insert(f.first);
+
+		bwt = wt_bwt(F); //Huffman-encoded BWT
+
+	}
+
+	// prepend the alphabet to the text
+
+	cout << "Alphabet = ";
+
+	for (auto rit = alphabet.rbegin(); rit != alphabet.rend(); rit++){
+
+		auto c = *rit;
+		cout << c;
+		bwt.extend(uint8_t(c));
+
+	}
+
+	cout << endl;
+
+	string text;
+
+	//read text
+	{
+		std::ifstream inFile;
+		inFile.open(filePath);
+		std::stringstream strStream;
+		strStream << inFile.rdbuf(); //read the file
+		text = strStream.str();
+	}
+
+	cout << "text length = " << text.length() << endl;
+
+	// process the text
+
+	vector<pair<int64_t, uint64_t> > LZ77k;// the parse
+	uint64_t pos = 0;//current position on the text
+	uint64_t k = 0;//current position inside the current phrase
+
+	{
+
+		auto range = bwt.get_full_interval();// interval of current phrase
+		uint64_t index = bwt.get_terminator_position();// co-lex position where current phrase should be if inserted
+		uint64_t phrase_len = 0; // current phrase length
+
+		char c = text[pos + (k++)]; //read first character
+
+		//length that optimizes the bitsize per character of the phrase
+		double opt_bitsize = 10000; // no offset will ever take this number of bits, right?
+		uint64_t opt_len = 0;
+		int64_t opt_off = 0;
+
+		int64_t off = 0;
+
+		double perc = 0;
+		double prev_perc = 0;
+
+		//pos+k is the position of the character following the last character that has been read
+		while(pos+k<=text.length()) {
+
+			range = bwt.LF(range, uint8_t(c));
+
+			if(empty_interval(range)){//no more previous matches: choose the length that minimizes the bit-size of the phrase
+
+				assert(opt_len>0);
+				LZ77k.push_back({opt_off,opt_len}); // push the optimum
+
+				//extend BWT with the phrase
+				for(uint64_t i = pos; i<pos+opt_len; ++i)
+					bwt.extend(uint8_t(text[i]));
+
+				k = 0;
+				pos += opt_len;
+
+				range = bwt.get_full_interval();
+				index = bwt.get_terminator_position();
+				phrase_len = 0;
+
+				c = text[pos + (k++)];//read first character after phrase
+
+				opt_bitsize = 10000;
+				opt_len = 0;
+				opt_off = 0;
+				off = 0;
+
+				perc = (100*double(pos))/text.length();
+				cout << perc << "% done." << endl;
+				if(perc >= prev_perc + 1){
+					cout << perc << "% done." << endl;
+					prev_perc = perc;
+				}
+
+			}else{
+
+				index = bwt.LF(index,uint8_t(c));
+				phrase_len++;
+
+				off = get_off(bwt, range, index, phrase_len);
+				auto bitsize = 1 + delta(off<0?-off:off) + delta(phrase_len);
+				double bit_per_char = double(bitsize)/double(phrase_len);
+
+				//found a new local optimum
+				if(bit_per_char < opt_bitsize){
+					opt_bitsize = bit_per_char;
+					opt_len = phrase_len;
+					opt_off = off;
+				}
+
+				//read next char
+				if(pos+k<text.length())
+					c = text[pos + k];
+
+				k++;
+
+			}
+
+		}
+
+
+		//last phrase has not been output
+		if(phrase_len>0){
+
+			assert(off>0);
+			LZ77k.push_back({off,phrase_len});
+
+		}
+
+	}
+
+	/*cout << "factorization: " << endl;
+	for(auto p : LZ77k){
+
+		auto d = 1+delta(p.first<0?-p.first:p.first);
+		cout << "off = " << p.first << " (" << d  << "  bits), len = " << p.second << " (" << (double(d)/double(p.second)) << " bit/symbol)" << endl;
+
+	}*/
+
+	auto N = bwt.size() -1;//file length
+
+
+	uint64_t positive = 0;//positive offsets
+
+	for(auto p : LZ77k){
+
+		positive += p.first>0;
+
+	}
+
+	cout << "positive offsets: " << positive << endl;
+	cout << "negative offsets: " << LZ77k.size()-positive << endl;
+
+	int bucket_size = 1;
+
+	/*auto buckets = vector<uint64_t>(bwt.size()/bucket_size + 1);
+
+	for(auto p : LZ77k){
+
+		buckets[(p.first<0?-p.first:p.first)/bucket_size]++;
+
+	}
+
+	for(int i=0;i<1000;++i){
+
+		//cout << "[" << i*bucket_size << "," << (i+1)*bucket_size << ") : " << buckets[i] << endl;
+		cout << i << "\t" << buckets[i] << endl;
+
+	}*/
+	vector<uint64_t> abs_off;
+	for(auto x : LZ77k) abs_off.push_back(x.first<0?-x.first:x.first);
+
+	vector<uint64_t> Len;
+	for(auto x : LZ77k) Len.push_back(x.second);
+
+	uint64_t sum_log = 0;
+
+	for(auto x:abs_off) sum_log += bit_size(x)+1;
+
+	auto G = alphabet.size()*8 + compute_gamma_bit_complexity(LZ77k);
+	auto D = alphabet.size()*8 + compute_delta_bit_complexity(LZ77k);
+	auto EO = (entropy(abs_off)+1);
+	auto EL = entropy(Len);
+	auto low_bound = (EO+EL)*LZ77k.size();
+
+	cout << "number of phrases = " << LZ77k.size() << endl<<endl;
+
+	cout << "Entropy of the offsets: " << EO << endl;
+	cout << "Entropy of the lengths: " << EL << endl;
+	cout << "Lower bound for encoding the pairs: " << low_bound << " bits (" << low_bound/double(N) << " bit/char, " << low_bound/8 + 1 << " Bytes)" << endl << endl;
+
+	cout << "Sum of logs of the offsets: " << sum_log << endl;
+	cout << "Average of logs of the offsets: " << double(sum_log)/double(LZ77k.size()) << endl<<endl;
+
+	cout << "gamma complexity of the output: " << G/8+1 << " Bytes, " << double(G)/double(N) << " bit/symbol" << endl;
+	cout << "delta complexity of the output: " << D/8+1 << " Bytes, " << double(D)/double(N) << " bit/symbol" << endl;
+
+}
+
+
+
 
 
 void run_triples(string filePath){
@@ -685,7 +945,7 @@ void run_triples(string filePath){
 	cout << "number of phrases = " << LZ77k.size() << endl;
 	cout << "Entropy of the offsets: " << (entropy(abs_off)+1) << endl;
 	cout << "Sum of logs of the offsets: " << sum_log << endl;
-	cout << "Weighted sum of logs of the offsets: " << double(sum_log)/double(LZ77k.size()) << endl;
+	cout << "Average of logs of the offsets: " << double(sum_log)/double(LZ77k.size()) << endl;
 	cout << "gamma complexity of the output: " << (G/8)+1 << " Bytes, " << double(G)/double(N) << " bit/symbol" << endl;
 	cout << "delta complexity of the output: " << (D/8)+1 << " Bytes, " << double(D)/double(N) << " bit/symbol" << endl;
 	cout << "Huffman complexity of the output: " << (H/8)+1 << " Bytes, " << double(H)/double(N) << " bit/symbol" << endl;
@@ -700,16 +960,20 @@ int main(int argc,char** argv){
 	if(argc<2) help();
 
 	bool triples = false;
+	bool local = false;
 	string filePath;
 
 	int opt;
-	while ((opt = getopt(argc, argv, "i:th")) != -1){
+	while ((opt = getopt(argc, argv, "i:thl")) != -1){
 		switch (opt){
 			case 'h':
 				help();
 			break;
 			case 't':
 				triples = true;
+			break;
+			case 'l':
+				local = true;
 			break;
 			case 'i':
 				filePath = string(optarg);
@@ -720,6 +984,8 @@ int main(int argc,char** argv){
 		}
 	}
 
+
+	if(triples and local) help();
 	if(filePath.length()==0) help();
 
 	cout << "Input file " << filePath << endl;
@@ -727,6 +993,10 @@ int main(int argc,char** argv){
 	if(triples){
 
 		run_triples(filePath);
+
+	}else if(local){
+
+		run_pairs_local(filePath);
 
 	}else{
 
