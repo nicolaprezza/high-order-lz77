@@ -92,6 +92,30 @@ uint64_t compute_delta_bit_complexity(vector<pair<int64_t,uint64_t> > & parse){
 
 }
 
+
+
+uint64_t compute_succinct_bit_complexity(vector<pair<int64_t,uint64_t> > & parse){
+
+	uint64_t x = 0;
+	double sum_off = 0;
+	double sum_len = 0;
+
+	for(auto p:parse){
+
+		uint64_t off = p.first<0?-p.first:p.first;//absolute value
+		uint64_t len = p.second;
+
+		sum_off += off;
+		sum_len += len;
+
+	}
+
+	double z = parse.size();
+
+	return uint64_t(z*(5 + log2(sum_off/z) + log2(sum_len/z))) + 1;
+
+}
+
 uint64_t compute_Huff_bit_complexity(vector<pair<int64_t,uint64_t> > & pairs, vector<char> trails){
 
 	uint64_t max_encoded_off = 3200000;//max offset that we encode with Huffman. The others use delta(0).delta(offset) (0 receives the longest code)
@@ -521,13 +545,15 @@ void run_pairs(string filePath){
 
 	}
 
-	/*cout << "factorization: " << endl;
+
+	cout << "factorization: " << endl;
 	for(auto p : LZ77k){
 
 		auto d = 1+delta(p.first<0?-p.first:p.first);
-		cout << "off = " << p.first << " (" << d  << "  bits), len = " << p.second << " (" << (double(d)/double(p.second)) << " bit/symbol)" << endl;
+		auto l = delta(p.second);
+		cout << "off = " << p.first << " (" << d  << "  bits), len = " << p.second << " (" << l << " bits). Tot: " << (double(d+l)/double(p.second)) << " bit/symbol)" << endl;
 
-	}*/
+	}
 
 	auto N = bwt.size() -1;//file length
 
@@ -571,6 +597,7 @@ void run_pairs(string filePath){
 
 	auto G = alphabet.size()*8 + compute_gamma_bit_complexity(LZ77k);
 	auto D = alphabet.size()*8 + compute_delta_bit_complexity(LZ77k);
+	auto SU = alphabet.size()*8 + compute_succinct_bit_complexity(LZ77k);
 	auto EO = (entropy(abs_off)+1);
 	auto EL = entropy(Len);
 	auto low_bound = (EO+EL)*LZ77k.size();
@@ -586,6 +613,7 @@ void run_pairs(string filePath){
 
 	cout << "gamma complexity of the output: " << G/8+1 << " Bytes, " << double(G)/double(N) << " bit/symbol" << endl;
 	cout << "delta complexity of the output: " << D/8+1 << " Bytes, " << double(D)/double(N) << " bit/symbol" << endl;
+	cout << "Succinct complexity of the output: " << SU/8+1 << " Bytes, " << double(SU)/double(N) << " bit/symbol" << endl;
 
 }
 
@@ -668,7 +696,6 @@ void run_pairs_local(string filePath){
 
 			if(empty_interval(range)){//no more previous matches: choose the length that minimizes the bit-size of the phrase
 
-				assert(opt_len>0);
 				LZ77k.push_back({opt_off,opt_len}); // push the optimum
 
 				//extend BWT with the phrase
@@ -706,6 +733,7 @@ void run_pairs_local(string filePath){
 				double bit_per_char = double(bitsize)/double(phrase_len);
 
 				//found a new local optimum
+				//if(bit_per_char < opt_bitsize and (phrase_len==1 or (off<0?-off:off)<128)){
 				if(bit_per_char < opt_bitsize){
 					opt_bitsize = bit_per_char;
 					opt_len = phrase_len;
@@ -733,13 +761,14 @@ void run_pairs_local(string filePath){
 
 	}
 
-	/*cout << "factorization: " << endl;
+	cout << "factorization: " << endl;
 	for(auto p : LZ77k){
 
 		auto d = 1+delta(p.first<0?-p.first:p.first);
-		cout << "off = " << p.first << " (" << d  << "  bits), len = " << p.second << " (" << (double(d)/double(p.second)) << " bit/symbol)" << endl;
+		auto l = delta(p.second);
+		cout << "off = " << p.first << " (" << d  << "  bits), len = " << p.second << " (" << l << " bits). Tot: " << (double(d+l)/double(p.second)) << " bit/symbol)" << endl;
 
-	}*/
+	}
 
 	auto N = bwt.size() -1;//file length
 
